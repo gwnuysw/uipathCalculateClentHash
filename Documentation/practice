@@ -1,0 +1,86 @@
+- REFramework로 시작한다.
+  - OrchestratorQueue는 안쓴다.
+  - 데이터 스크래핑을 사용한다.
+  - transactionitem은 datarow다. 데이터 테이블 사용할때 이런 방법을 쓴다.
+- 변하기 쉬운 데이터 들은 config엑셀 파일에 명시하는게 좋다.
+  - settings시트에 System1URL과 SHA1 Online URL을 넣는다.
+  - acme System1을 사용하려면 계정이 있어야한다. 우리는 Orchestrator Assets을 이용할거다.
+  엑셀 settings에 System1_Credential 이름으로 Assset 을 지정한다.
+- config엑셀의 constatns시트로 와서 maxretrynumber를 2로 맞춘다.
+- framework를 좀 수정해 줘야 한다.
+  - main의 transactionitem 변수를 Datarow로 변경한다. GetTransactionData, Process, SetTransactionStatus
+  워크플로우에 argument도 transactionitem에 맞춰서 datarow로 변경한다.
+  - SetTransactionStatus워크플로우에 SetTransactionStatus 액티비티 세개를 지운다(?)
+  Orchestrator에서 제공하는 transaction 기능을 사용하지 않을 거기 때문이다.
+- ACME System1, Sha1-Online.com 이 두개 앱을 사용할 거기 때문에 "System1", "SHA1Online" 폴더를 만든다.
+- System1폴더에 빈 시퀀스를 만든다. 이걸로 로그인 프로세스를 만들거다.
+  - 주석잘달아라
+  - Argument 두개를 만든다. in_System1URL, in_System1Credential
+  - Framework\GetAppCredential.xaml 워크플로우를 호출합니다.(하고싶어도 framework에 없음)
+    - 입력
+      - String in_Credemtial = in_System1Credential
+    - 출력
+      - String username = out_Username
+      - String password = out_Password
+  - 로그인 과정 레코딩을 넣습니다.
+  - 로그인 실패시 에러창 클릭과 에러 throw 과정을 실행하도록 만듭니다.
+- 로그아웃 워크플로우도 만듭니다. 클로즈 탭까지 합니다.
+- SHa1 online 프로세스도 똑같이 진행합니다.
+- 이렇게 두가지 application을 열고 닫는 과정을 만들었으니, 이제 프레임워크 initialization, end process를
+수정해 줍시다.
+  - Framework\InitAllApplications.xaml에서 System1_login.xaml를 호출합니다.
+    - 입력
+      - String in_Sytem1URL = in_Config("System1_URL").ToString
+      - String in_System1Credential = in_Config("System1_Credential").ToString
+  - SHA1Online_LOginworkflow.xaml을 호출합니다.
+    - 입력으로 sha1 uRl을 보냅니다.
+- Framework\CloseAllApplications.xaml에서 acme system1, sha1 닫는 작업을 호출합니다.
+- Framework\KillAllProcesses.xaml
+- System1 folder에 ACME work items를 클릭하는 작업을 만듭니다. 나중에 다른 워크플로우에서
+많이 호출해 쓸겁니다. Attach Browser없이 클릭액티비티만 사용합니다.
+- 트랜잭션 프로세스를 시작하기 전에, init state에서 데이터를 읽는 작업을 해야합니다.
+read range를 쓰거나 Read CSV를 쓰면 되는데 우리의 데이터는 웹에있으니까 다른 작업을 추가로 더해야합니다.
+- 자, 우리는 제일먼저 모든 WI5 항목을 가져올겁니다.
+  - 데이터 스크래핑할때 maximum number of reasults를 0으로 설정해서 모든 데이터를 가져옵니다.
+- Main workflow에 init state를 들여다 봅니다.
+  - KillAllProcesses 바로 밑에서 이 워크플로들을 호출합니다.
+    - System1Login
+    - System1Navigate to work items
+    - System1Extract work item data table
+    - System1 close
+  - argument설정을 합니다.
+  - Assign 액티비티를 이용해서 테이블 필터링을 합니다.
+    - WIList = dt_WIs.Select("Type = 'WI5' AND Status ='Open'")
+    - 이렇게 하면 WIList의 자료형은 Datarow[] 입니다.
+- Framework\GetTransactionData.xaml 파일을 수정할겁니다.
+  - 입력 argument에 WIlist를 추가합니다.
+  - wilist개수 체크하는 로직을 추가합니다.
+    - if (in_TransactionNumber <= inWIList.Count)
+      - then
+        - out_TransactionItem = in_WIList(in_TransactionNumber)
+      - Else
+        - out_TransactionItem = Nothing
+    - 그리고 TransactionID = out_TransactionItem("WIID").ToString로 설정
+- 이제 Process State를 만져볼거다.
+  - System1폴더에 빈 시퀀스를 만든다. 얘는 이제 WIID를 가지고 detail page를 들어갈 녀석이다.
+  - System1 Dashboard에서 workitem detail로 이동하는 Navigate To를 만듭니다.
+- 이제 System1 폴더에 System1_ExtractClientInformation이라는 새 워크플로를 만듭니다.
+  - 입력은 없습니다. 단 이미 workitem detail page가 오픈되있어야 합니다.
+  - 출력은 3가지 입니다. : ClientID, ClientName, ClientCountry
+  - Get TExt 쓸떄는 waitforready 속석을 '완료'로 해줍니다.
+  - 이렇게 만든것을 State에서 호출합니다.
+  - 입력
+    - workitem detail uRl
+  - 출력
+    - 3가지 뽑은거
+  - 이제 이 뽑은걸로 SHA1Online.com에서 hash 코드를 뽑습니다.
+    - 그러기 위해 sha1online폴더에 빈 시퀀스를 갖다 놓습니다. 이름은 SHA1Online_GetHashCode입니다.
+      -입력
+        - id
+      - 출력
+        - hash code
+      - 작업
+        - acme 첫화면으로 이동? 이걸왜?
+      - 해시코드를 'ClientID-ClientName-ClientCountry'를 입력해서 만듭니다.
+      System1_ExtractClientInformation의 출력을 SHA1Online_GetHashCode의 입력으로 넣습니다.
+  - 이제 가져온 해시코드를 acme system1에 입력할 프로세스를 만들겁니다.
